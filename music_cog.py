@@ -1,12 +1,13 @@
 import discord
 from discord.ext import commands
 from youtube_dl import YoutubeDL
-# import nacl
-# from discord.utils import get
-# from youtube_dl import *
-# from discord import channel
-# from discord import voice_client
-# from discord.voice_client import VoiceClient
+import nacl
+from discord.utils import get
+from youtube_dl import *
+from discord import channel
+from discord import voice_client
+from discord.voice_client import VoiceClient
+import ffmpeg
 
 class music_cog(commands.Cog):
     def __init__(self, bot):
@@ -49,12 +50,12 @@ class music_cog(commands.Cog):
             if self.vc == "" or not self.vc.is_connected():
                 self.vc = await self.music_queue[0][1].connect()
             else:
-                self.vc = await self.bot.move_to(self.music_queue[0][1])
+                pass
 
             print(self.music_queue)
             self.music_queue.pop(0)
 
-            self.vc.play(discord.FFmpegPCMAudio(m_url, **self.FFMPEG_OPTIONS), after=lambda e: self.play_next())
+            self.vc.play(discord.FFmpegPCMAudio(m_url, **self.FFMPEG_OPTIONS), after = lambda e: self.play_next())
         else:
             self.is_playing = False
 
