@@ -1,0 +1,1 @@
+worker: python3 sn_core.py
