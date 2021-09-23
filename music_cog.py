@@ -153,12 +153,13 @@ class music_cog(commands.Cog):
         if self.vc and self.vc.is_playing():
             song_embed = discord.Embed(
                   title = f"{user.name} | Music stopped",
-                  description = f"Music has been stopped",
+                  description = f"Music has been stopped and queue has been cleared",
                   color = discord.Color.from_rgb(222,46,44)
             )
             song_embed.set_footer(text='🛑 Stop')
             await ctx.reply(embed=song_embed, mention_author = False)
             await ctx.message.add_reaction('🛑')
+            self.music_queue = ""
             self.vc.stop()
         else:
             song_embed = discord.Embed(
