@@ -9,7 +9,9 @@ from music_cog import music_cog
 
 TOKEN = 'BOT-TOKEN-HERE'
 
-client = commands.Bot(command_prefix = 's.')
+intents = Intents.default()
+intents.message_content = True
+client = commands.Bot(command_prefix = 's.', intents=intents)
 client.remove_command('help')
 
 client.add_cog(music_cog(client))
