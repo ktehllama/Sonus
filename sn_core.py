@@ -7,7 +7,7 @@ from discord.ext import commands
 # from youtube_dl import *
 from music_cog import music_cog
 
-TOKEN = 'ODkwMjk3ODkxNDU1OTIyMjU2.YUtwhg.T5EDgiCwRrNeGGqAYS-0b8ICDa8'
+TOKEN = 'BOT-TOKEN-HERE'
 
 client = commands.Bot(command_prefix = 's.')
 client.remove_command('help')
