@@ -16,6 +16,7 @@ Sonus currently uses these modules. (Installed via Pip)
 - [YoutubeDL](https://github.com/ytdl-org/youtube-dl)
 - [FFmpeg](https://github.com/kkroening/ffmpeg-python)
 - [re](https://pypi.org/project/regex/)
+- NaCl/[PyNaCl](https://pypi.org/project/PyNaCl/)
 
 ## History
  Created near November, 2021,  when many mainstream Discord music bots were taken offline, Sonus was created as a side project to understand why many music bots were going offline and how powerful this technology of streaming _free_, _24/7_ music on Discord Voice Channels really could be. The main objective though was to experiment with the FFmpeg, YoutubeDL and the Discord Voice Client libraries.
