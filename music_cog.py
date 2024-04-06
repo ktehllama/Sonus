@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 from youtube_dl import YoutubeDL
-import nacl
+# import nacl
 from discord.utils import get
 from youtube_dl import *
 from discord import channel
