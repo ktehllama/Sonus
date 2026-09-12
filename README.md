@@ -1,7 +1,7 @@
 # Sonus
 ## _A Pretty Average Discord Music Bot_
 
-Sonus, a simple but effective music bot, complete with a skip, stop and a modern queue system — now with playlist support.
+Sonus, a simple but effective music bot, complete with a skip, stop and a modern queue system - now with playlist support.
 
 ## Installation
 Sonus requires a [Python](https://www.python.org/downloads/) version 3.10+
