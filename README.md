@@ -29,7 +29,7 @@ Then install the Python dependencies:
 pip install -r requirements.txt
 ```
 
-> Note: This bot was originally written in 2021 and went unmaintained for a while, as YouTube, discord.py, and Discord's own voice protocol all moved on without it. It's no longer outdated - it's been fully patched up and confirmed working on modern discord.py (2.x+) and yt-dlp, with playlist support added on top. See **Changes** below for what was fixed. Urs truly *~ TR-ASH*
+> Note: This bot was originally written in 2021 and went unmaintained for a while, as YouTube, discord.py, and Discord's own voice protocol all moved on without it. It's no longer outdated - it's been fully patched up and confirmed working on modern discord.py (2.x+) and yt-dlp, with playlist support added on top. See **Changes** below for what was fixed. UR WELCOME ~ TR-ASH 2026
 
 ## Modules
 Sonus currently uses these modules. (Installed via Pip)
