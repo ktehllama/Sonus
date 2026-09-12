@@ -3,6 +3,58 @@ from discord.ext import commands
 from yt_dlp import YoutubeDL
 import re
 
+QUEUE_PAGE_SIZE = 10
+
+
+class QueueView(discord.ui.View):
+    """Adds Previous/Next buttons to a paginated queue embed.
+
+    Only the person who ran the queue command can flip pages, and the
+    buttons disable themselves after a couple minutes of inactivity so
+    they don't sit there indefinitely as a dead interaction.
+    """
+
+    def __init__(self, author_id, pages):
+        super().__init__(timeout=120)
+        self.author_id = author_id
+        self.pages = pages
+        self.current = 0
+        self.message = None
+        self._update_buttons()
+
+    def _update_buttons(self):
+        self.previous_button.disabled = self.current == 0
+        self.next_button.disabled = self.current == len(self.pages) - 1
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "Only the person who ran the queue command can flip pages.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label='◀', style=discord.ButtonStyle.secondary)
+    async def previous_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current -= 1
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self.pages[self.current], view=self)
+
+    @discord.ui.button(label='▶', style=discord.ButtonStyle.secondary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current += 1
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self.pages[self.current], view=self)
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass
+
 class music_cog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -10,7 +62,7 @@ class music_cog(commands.Cog):
         self.is_playing = False
 
         self.music_queue = []
-        self.YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist': True}
+        self.YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist': True, 'ignoreerrors': True}
         self.FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1', 'options': '-vn'}
 
         self.vc = None
@@ -172,21 +224,8 @@ class music_cog(commands.Cog):
     @commands.command(aliases=['q'])
     async def queue(self, ctx):
         user = ctx.message.author
-        retval = ""
 
-        for i in range(0, len(self.music_queue)):
-            retval += "**`" + self.music_queue[i][0]['title'] + "`**\n—\n"
-
-        if retval != "":
-            song_embed = discord.Embed(
-                title=f"{user.name} | Queue",
-                description=f"*`{len(self.music_queue)}` songs in queue*\n\n—\n{retval}",
-                color=discord.Color.from_rgb(109, 167, 250)
-            )
-            song_embed.set_footer(text='📃 Queue')
-            await ctx.reply(embed=song_embed, mention_author=False)
-            await ctx.message.add_reaction('📃')
-        else:
+        if not self.music_queue:
             song_embed = discord.Embed(
                 title=f"{user.name}, queue is empty",
                 description="There is no music queued up",
@@ -195,6 +234,39 @@ class music_cog(commands.Cog):
             song_embed.set_footer(text='📃 Queue')
             await ctx.reply(embed=song_embed, mention_author=False)
             await ctx.message.add_reaction('📃')
+            return
+
+        total = len(self.music_queue)
+        total_pages = (total - 1) // QUEUE_PAGE_SIZE + 1
+        pages = []
+
+        for page_num in range(total_pages):
+            start = page_num * QUEUE_PAGE_SIZE
+            chunk = self.music_queue[start:start + QUEUE_PAGE_SIZE]
+
+            retval = ""
+            for i, entry in enumerate(chunk, start=start + 1):
+                retval += f"**`{i}.`** {entry[0]['title']}\n—\n"
+
+            song_embed = discord.Embed(
+                title=f"{user.name} | Queue",
+                description=f"*`{total}` songs in queue*\n\n—\n{retval}",
+                color=discord.Color.from_rgb(109, 167, 250)
+            )
+            footer = '📃 Queue'
+            if total_pages > 1:
+                footer += f" | Page {page_num + 1}/{total_pages}"
+            song_embed.set_footer(text=footer)
+            pages.append(song_embed)
+
+        if total_pages == 1:
+            await ctx.reply(embed=pages[0], mention_author=False)
+        else:
+            view = QueueView(user.id, pages)
+            message = await ctx.reply(embed=pages[0], view=view, mention_author=False)
+            view.message = message
+
+        await ctx.message.add_reaction('📃')
 
     @commands.command(aliases=['st'])
     async def stop(self, ctx):
