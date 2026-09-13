@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 from yt_dlp import YoutubeDL
+import asyncio
 import re
 
 QUEUE_PAGE_SIZE = 10
@@ -69,6 +70,7 @@ class music_cog(commands.Cog):
         self.music_queue = []
         self.YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist': True, 'ignoreerrors': True}
         self.FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1', 'options': '-vn'}
+        self.current_lookup_task = None
 
         self.vc = None
 
@@ -130,6 +132,16 @@ class music_cog(commands.Cog):
 
         song = self._song_from_info(info)
         return [song] if song else False
+
+    def _format_eta(self, seconds, force_minutes=False):
+        # Once the estimate goes past double digits (100+ seconds), showing
+        # it in minutes is easier to read than a large raw seconds count.
+        if force_minutes or seconds >= 100:
+            minutes = seconds / 60
+            if minutes == int(minutes):
+                return f"{int(minutes)}m"
+            return f"{minutes:.1f}m"
+        return f"{seconds}s"
 
     async def count_playlist_songs(self, item):
         """Quickly counts songs in a playlist URL without resolving each
@@ -216,22 +228,58 @@ class music_cog(commands.Cog):
         status_message = await ctx.reply(embed=wait_embed, mention_author=False)
         await ctx.message.add_reaction('⏳')
 
-        # For playlist links, do a fast flat-mode count first so we can show
-        # a real ETA before the slower full resolution of every track starts.
-        playlist_count = await self.count_playlist_songs(query)
-        if playlist_count and playlist_count > 1:
-            low = playlist_count * SECONDS_PER_SONG_ESTIMATE
-            high = playlist_count * SECONDS_PER_SONG_ESTIMATE * 2
-            wait_embed.description = (
-                f"Downloading {playlist_count} songs from the playlist.. "
-                f"this might take a moment...\nEstimated time: ~{low}-{high} seconds"
+        async def _do_lookup():
+            # For playlist links, do a fast flat-mode count first so we can
+            # show a real ETA before the slower full resolution of every
+            # track starts.
+            playlist_count = await self.count_playlist_songs(query)
+            if playlist_count and playlist_count > 1:
+                low = playlist_count * SECONDS_PER_SONG_ESTIMATE
+                high = playlist_count * SECONDS_PER_SONG_ESTIMATE * 2
+
+                # Format both ends with the same unit - once the high estimate
+                # crosses into triple digits, minutes reads better than a mix
+                # of "45s-140s".
+                use_minutes = high >= 100
+                low_str = self._format_eta(low, force_minutes=use_minutes)
+                high_str = self._format_eta(high, force_minutes=use_minutes)
+
+                wait_embed.description = (
+                    f"Downloading {playlist_count} songs from the playlist.. "
+                    f"this might take a moment...\nEstimated time: ~{low_str}-{high_str}"
+                )
+                try:
+                    await status_message.edit(embed=wait_embed)
+                except discord.HTTPException:
+                    pass
+
+            return await self.search_yt(query)
+
+        self.current_lookup_task = asyncio.ensure_future(_do_lookup())
+        try:
+            songs = await self.current_lookup_task
+        except asyncio.CancelledError:
+            # s.stop cancelled the lookup while it was still running. The
+            # background yt-dlp thread can't be forcibly killed, but we just
+            # drop its result when it eventually finishes - nothing gets queued.
+            cancelled_embed = discord.Embed(
+                title=f"{user.name} | Lookup cancelled",
+                description="Song lookup was stopped before it finished",
+                color=discord.Color.from_rgb(222, 46, 44)
             )
+            cancelled_embed.set_footer(text='🛑 Play')
             try:
-                await status_message.edit(embed=wait_embed)
+                await status_message.edit(embed=cancelled_embed)
             except discord.HTTPException:
                 pass
-
-        songs = await self.search_yt(query)
+            try:
+                await ctx.message.remove_reaction('⏳', self.bot.user)
+            except discord.HTTPException:
+                pass
+            await ctx.message.add_reaction('🛑')
+            return
+        finally:
+            self.current_lookup_task = None
 
         if songs is False:
             song_embed = discord.Embed(
@@ -339,17 +387,35 @@ class music_cog(commands.Cog):
     @commands.command(aliases=['st'])
     async def stop(self, ctx):
         user = ctx.message.author
-        if self.vc and self.vc.is_playing():
+
+        cancelled_lookup = False
+        if self.current_lookup_task and not self.current_lookup_task.done():
+            self.current_lookup_task.cancel()
+            cancelled_lookup = True
+
+        stopped_playback = bool(self.vc and self.vc.is_playing())
+        if stopped_playback:
+            self.music_queue = []
+            self.vc.stop()
+
+        if stopped_playback and cancelled_lookup:
+            description = "Stopped playback, cleared the queue, and cancelled the song lookup in progress"
+        elif stopped_playback:
+            description = "Music has been stopped and queue has been cleared"
+        elif cancelled_lookup:
+            description = "Cancelled the song/playlist lookup in progress"
+        else:
+            description = None
+
+        if description is not None:
             song_embed = discord.Embed(
-                title=f"{user.name} | Music stopped",
-                description="Music has been stopped and queue has been cleared",
+                title=f"{user.name} | Stopped",
+                description=description,
                 color=discord.Color.from_rgb(222, 46, 44)
             )
             song_embed.set_footer(text='🛑 Stop')
             await ctx.reply(embed=song_embed, mention_author=False)
             await ctx.message.add_reaction('🛑')
-            self.music_queue = []
-            self.vc.stop()
         else:
             song_embed = discord.Embed(
                 title=f"{user.name}, no music is playing",
