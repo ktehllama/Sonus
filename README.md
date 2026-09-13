@@ -50,6 +50,7 @@ This fork/version patches several issues that had built up since 2021:
 - Fixed song lookups grabbing the wrong (often unplayable) stream URL instead of the actual selected audio format
 - Added the `PyNaCl` and `davey` dependencies now required for Discord voice connections
 - Added support for playlist links: `s.play <playlist URL>` now queues every track in the playlist instead of only the first (or crashing)
+- And more !
 
 ## History
 Created near November, 2021, when many mainstream Discord music bots were taken offline, Sonus was created as a side project to understand why many music bots were going offline and how powerful this technology of streaming _free_, _24/7_ music on Discord Voice Channels really could be. The main objective though was to experiment with the FFmpeg, YoutubeDL and the Discord Voice Client libraries.

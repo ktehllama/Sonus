@@ -3,7 +3,7 @@ from discord.ext import commands
 
 from music_cog import music_cog
 
-TOKEN = 'ADD_UR_TOKEN_HERE'
+TOKEN = 'ur_token_here'
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -27,17 +27,17 @@ async def on_ready():
 @client.command()
 async def help(ctx, cata=None):
     user = ctx.message.author
-
+ 
     if cata == None:
         song_embed = discord.Embed(
             title = f"{user.name} | Help (All commands)",
-            description = f"`play`,`queue`,`stop`,`skip`",
+            description = f"`play`,`queue`,`stop`,`pause`,`resume`,`skip`,`disconnect`",
             color = discord.Color.from_rgb(182,224,222)
         )
         song_embed.set_footer(text='🔧 Help | To see how a command works, type: help <name of command>')
         await ctx.reply(embed=song_embed, mention_author = False)
         await ctx.message.add_reaction('🔧')
-
+ 
     elif cata == 'play':
         song_embed = discord.Embed(
             title = f"{user.name} | Play",
@@ -47,7 +47,7 @@ async def help(ctx, cata=None):
         song_embed.set_footer(text='🔧 Help | Aliases : p')
         await ctx.reply(embed=song_embed, mention_author = False)
         await ctx.message.add_reaction('🔧')
-
+ 
     elif cata == 'queue':
         song_embed = discord.Embed(
             title = f"{user.name} | Queue",
@@ -57,7 +57,7 @@ async def help(ctx, cata=None):
         song_embed.set_footer(text='🔧 Help | Aliases : q')
         await ctx.reply(embed=song_embed, mention_author = False)
         await ctx.message.add_reaction('🔧')
-
+ 
     elif cata == 'stop':
         song_embed = discord.Embed(
             title = f"{user.name} | Stop",
@@ -67,7 +67,27 @@ async def help(ctx, cata=None):
         song_embed.set_footer(text='🔧 Help | Aliases : st')
         await ctx.reply(embed=song_embed, mention_author = False)
         await ctx.message.add_reaction('🔧')
-
+ 
+    elif cata == 'pause':
+        song_embed = discord.Embed(
+            title = f"{user.name} | Pause",
+            description = f"**`Pause`**\n\nSyntax: `s.pause`\n\nPauses the currently playing song, keeping it in place so it can be resumed later",
+            color = discord.Color.from_rgb(182,224,222)
+        )
+        song_embed.set_footer(text='🔧 Help | Aliases : pa')
+        await ctx.reply(embed=song_embed, mention_author = False)
+        await ctx.message.add_reaction('🔧')
+ 
+    elif cata == 'resume':
+        song_embed = discord.Embed(
+            title = f"{user.name} | Resume",
+            description = f"**`Resume`**\n\nSyntax: `s.resume`\n\nResumes a paused song from where it left off",
+            color = discord.Color.from_rgb(182,224,222)
+        )
+        song_embed.set_footer(text='🔧 Help | Aliases : r, unpause')
+        await ctx.reply(embed=song_embed, mention_author = False)
+        await ctx.message.add_reaction('🔧')
+ 
     elif cata == 'skip':
         song_embed = discord.Embed(
             title = f"{user.name} | Skip",
@@ -77,5 +97,16 @@ async def help(ctx, cata=None):
         song_embed.set_footer(text='🔧 Help | Aliases : s')
         await ctx.reply(embed=song_embed, mention_author = False)
         await ctx.message.add_reaction('🔧')
+ 
+    elif cata == 'disconnect':
+        song_embed = discord.Embed(
+            title = f"{user.name} | Disconnect",
+            description = f"**`Disconnect`**\n\nSyntax: `s.disconnect`\n\nStops playback, clears the queue, and leaves the voice channel",
+            color = discord.Color.from_rgb(182,224,222)
+        )
+        song_embed.set_footer(text='🔧 Help | Aliases : dc, leave')
+        await ctx.reply(embed=song_embed, mention_author = False)
+        await ctx.message.add_reaction('🔧')
+
 
 client.run(TOKEN)

@@ -4,6 +4,11 @@ from yt_dlp import YoutubeDL
 import re
 
 QUEUE_PAGE_SIZE = 10
+URL_REGEX = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*(),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+# Rough average time to resolve one song's playable audio format, used only
+# to give a ballpark ETA for playlists - actual time varies with network
+# conditions and per-video, so this is intentionally a loose estimate.
+SECONDS_PER_SONG_ESTIMATE = 3
 
 
 class QueueView(discord.ui.View):
@@ -91,7 +96,7 @@ class music_cog(commands.Cog):
         A playlist URL yields one entry per track in the playlist.
         """
         loop = self.bot.loop
-        urls = re.findall('http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*(),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', item)
+        urls = re.findall(URL_REGEX, item)
 
         def extract():
             with YoutubeDL(self.YDL_OPTIONS) as ydl:
@@ -125,6 +130,34 @@ class music_cog(commands.Cog):
 
         song = self._song_from_info(info)
         return [song] if song else False
+
+    async def count_playlist_songs(self, item):
+        """Quickly counts songs in a playlist URL without resolving each
+        one's audio format, so we can show an ETA before doing the slow work.
+        Returns None if `item` isn't a playlist link (or the count can't be
+        determined) - the caller should just skip showing an ETA in that case.
+        """
+        if not re.findall(URL_REGEX, item):
+            return None
+
+        loop = self.bot.loop
+        flat_options = {'extract_flat': True, 'quiet': True, 'ignoreerrors': True}
+
+        def extract_flat():
+            try:
+                with YoutubeDL(flat_options) as ydl:
+                    return ydl.extract_info(item, download=False, process=False)
+            except Exception:
+                return None
+
+        info = await loop.run_in_executor(None, extract_flat)
+        if not info or 'entries' not in info:
+            return None
+
+        try:
+            return len(list(info['entries']))
+        except Exception:
+            return None
 
     def play_next(self):
         if len(self.music_queue) > 0:
@@ -169,57 +202,92 @@ class music_cog(commands.Cog):
             song_embed.set_footer(text='🎵 Play')
             await ctx.reply(embed=song_embed, mention_author=False)
             await ctx.message.add_reaction('🎵')
+            return
+
+        # Looking a song (or worse, a playlist) up can take a while, so show
+        # a placeholder right away and edit it in place once we know the
+        # outcome, rather than leaving the user staring at nothing.
+        wait_embed = discord.Embed(
+            title=f"{user.name} | Please wait",
+            description="Downloading song.. this might take a moment...",
+            color=discord.Color.from_rgb(255, 205, 74)
+        )
+        wait_embed.set_footer(text='⏳ Play')
+        status_message = await ctx.reply(embed=wait_embed, mention_author=False)
+        await ctx.message.add_reaction('⏳')
+
+        # For playlist links, do a fast flat-mode count first so we can show
+        # a real ETA before the slower full resolution of every track starts.
+        playlist_count = await self.count_playlist_songs(query)
+        if playlist_count and playlist_count > 1:
+            low = playlist_count * SECONDS_PER_SONG_ESTIMATE
+            high = playlist_count * SECONDS_PER_SONG_ESTIMATE * 2
+            wait_embed.description = (
+                f"Downloading {playlist_count} songs from the playlist.. "
+                f"this might take a moment...\nEstimated time: ~{low}-{high} seconds"
+            )
+            try:
+                await status_message.edit(embed=wait_embed)
+            except discord.HTTPException:
+                pass
+
+        songs = await self.search_yt(query)
+
+        if songs is False:
+            song_embed = discord.Embed(
+                title=f"{user.name}, there was a problem",
+                description="That song was either not found, or currently not available\nPlease try again",
+                color=discord.Color.from_rgb(232, 14, 51)
+            )
+            song_embed.set_footer(text='🎵 Play')
         else:
-            songs = await self.search_yt(query)
-            if songs is False:
-                song_embed = discord.Embed(
-                    title=f"{user.name}, there was a problem",
-                    description="That song was either not found, or currently not available\nPlease try again",
-                    color=discord.Color.from_rgb(232, 14, 51)
-                )
-                song_embed.set_footer(text='🎵 Play')
-                await ctx.reply(embed=song_embed, mention_author=False)
-                await ctx.message.add_reaction('🎵')
-            else:
-                voice_channel = ctx.message.author.voice.channel
-                was_empty_and_idle = (len(self.music_queue) == 0 and not self.is_playing)
+            voice_channel = ctx.message.author.voice.channel
+            was_empty_and_idle = (len(self.music_queue) == 0 and not self.is_playing)
 
-                for song in songs:
-                    self.music_queue.append([song, voice_channel])
+            for song in songs:
+                self.music_queue.append([song, voice_channel])
 
-                if self.is_playing == False:
-                    await self.play_music()
+            if self.is_playing == False:
+                await self.play_music()
 
-                if len(songs) == 1:
-                    title = songs[0]['title']
-                    if was_empty_and_idle:
-                        song_embed = discord.Embed(
-                            title=f"{user.name} | Playing song",
-                            description=f"Playing **`{title}`**",
-                            color=discord.Color.from_rgb(13, 217, 199)
-                        )
-                    else:
-                        song_embed = discord.Embed(
-                            title=f"{user.name} | Added to queue",
-                            description=f"Added **`{title}`** to queue",
-                            color=discord.Color.from_rgb(109, 167, 250)
-                        )
-                    song_embed.set_footer(text='🎵 Play')
-                    await ctx.reply(embed=song_embed, mention_author=False)
-                    await ctx.message.add_reaction('🎵')
-                else:
-                    if was_empty_and_idle:
-                        description = f"Added **`{len(songs)}`** songs from the playlist to queue\nNow playing **`{songs[0]['title']}`**"
-                    else:
-                        description = f"Added **`{len(songs)}`** songs from the playlist to queue"
+            if len(songs) == 1:
+                title = songs[0]['title']
+                if was_empty_and_idle:
                     song_embed = discord.Embed(
-                        title=f"{user.name} | Playlist added",
-                        description=description,
+                        title=f"{user.name} | Playing song",
+                        description=f"Playing **`{title}`**",
+                        color=discord.Color.from_rgb(13, 217, 199)
+                    )
+                else:
+                    song_embed = discord.Embed(
+                        title=f"{user.name} | Added to queue",
+                        description=f"Added **`{title}`** to queue",
                         color=discord.Color.from_rgb(109, 167, 250)
                     )
-                    song_embed.set_footer(text='🎵 Play')
-                    await ctx.reply(embed=song_embed, mention_author=False)
-                    await ctx.message.add_reaction('🎵')
+            else:
+                if was_empty_and_idle:
+                    description = f"Added **`{len(songs)}`** songs from the playlist to queue\nNow playing **`{songs[0]['title']}`**"
+                else:
+                    description = f"Added **`{len(songs)}`** songs from the playlist to queue"
+                song_embed = discord.Embed(
+                    title=f"{user.name} | Playlist added",
+                    description=description,
+                    color=discord.Color.from_rgb(109, 167, 250)
+                )
+
+        song_embed.set_footer(text='🎵 Play')
+        try:
+            await status_message.edit(embed=song_embed)
+        except discord.HTTPException:
+            # Original message got deleted or is otherwise unreachable -
+            # send a fresh one instead so the result isn't lost.
+            await ctx.send(embed=song_embed)
+
+        try:
+            await ctx.message.remove_reaction('⏳', self.bot.user)
+        except discord.HTTPException:
+            pass
+        await ctx.message.add_reaction('🎵')
 
     @commands.command(aliases=['q'])
     async def queue(self, ctx):
@@ -291,6 +359,86 @@ class music_cog(commands.Cog):
             song_embed.set_footer(text='🛑 Stop')
             await ctx.reply(embed=song_embed, mention_author=False)
             await ctx.message.add_reaction('🛑')
+
+    @commands.command(aliases=['dc', 'leave'])
+    async def disconnect(self, ctx):
+        user = ctx.message.author
+        if self.vc and self.vc.is_connected():
+            # Clear the queue and flip is_playing off first, so the
+            # after-callback triggered by vc.stop() (play_next) sees an
+            # empty queue and doesn't try to start another song.
+            self.music_queue = []
+            self.is_playing = False
+
+            if self.vc.is_playing():
+                self.vc.stop()
+
+            await self.vc.disconnect()
+            self.vc = None
+
+            song_embed = discord.Embed(
+                title=f"{user.name} | Disconnected",
+                description="Left the voice channel and cleared the queue",
+                color=discord.Color.from_rgb(222, 46, 44)
+            )
+            song_embed.set_footer(text='👋 Disconnect')
+            await ctx.reply(embed=song_embed, mention_author=False)
+            await ctx.message.add_reaction('👋')
+        else:
+            song_embed = discord.Embed(
+                title=f"{user.name}, not connected",
+                description="I'm not currently in a voice channel",
+                color=discord.Color.from_rgb(232, 14, 51)
+            )
+            song_embed.set_footer(text='👋 Disconnect')
+            await ctx.reply(embed=song_embed, mention_author=False)
+            await ctx.message.add_reaction('👋')
+
+    @commands.command(aliases=['pa'])
+    async def pause(self, ctx):
+        user = ctx.message.author
+        if self.vc and self.vc.is_playing():
+            self.vc.pause()
+            song_embed = discord.Embed(
+                title=f"{user.name} | Paused",
+                description="Playback has been paused",
+                color=discord.Color.from_rgb(255, 205, 74)
+            )
+            song_embed.set_footer(text='⏸️ Pause')
+            await ctx.reply(embed=song_embed, mention_author=False)
+            await ctx.message.add_reaction('⏸️')
+        else:
+            song_embed = discord.Embed(
+                title=f"{user.name}, nothing to pause",
+                description="There is no music currently playing",
+                color=discord.Color.from_rgb(232, 14, 51)
+            )
+            song_embed.set_footer(text='⏸️ Pause')
+            await ctx.reply(embed=song_embed, mention_author=False)
+            await ctx.message.add_reaction('⏸️')
+
+    @commands.command(aliases=['r', 'unpause'])
+    async def resume(self, ctx):
+        user = ctx.message.author
+        if self.vc and self.vc.is_paused():
+            self.vc.resume()
+            song_embed = discord.Embed(
+                title=f"{user.name} | Resumed",
+                description="Playback has been resumed",
+                color=discord.Color.from_rgb(13, 217, 199)
+            )
+            song_embed.set_footer(text='▶️ Resume')
+            await ctx.reply(embed=song_embed, mention_author=False)
+            await ctx.message.add_reaction('▶️')
+        else:
+            song_embed = discord.Embed(
+                title=f"{user.name}, nothing to resume",
+                description="Playback is not currently paused",
+                color=discord.Color.from_rgb(232, 14, 51)
+            )
+            song_embed.set_footer(text='▶️ Resume')
+            await ctx.reply(embed=song_embed, mention_author=False)
+            await ctx.message.add_reaction('▶️')
 
     @commands.command(aliases=['s'])
     async def skip(self, ctx):
