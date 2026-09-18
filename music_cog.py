@@ -302,6 +302,17 @@ class music_cog(commands.Cog):
         query = " ".join(args)
         user = ctx.message.author
 
+        if not query.strip():
+            song_embed = discord.Embed(
+                title=f"{user.name}, there was a problem",
+                description="No song was mentioned\nSyntax: `s.play <song name or YouTube link>`",
+                color=discord.Color.from_rgb(232, 14, 51)
+            )
+            song_embed.set_footer(text='🎵 Play')
+            await ctx.reply(embed=song_embed, mention_author=False)
+            await ctx.message.add_reaction('🎵')
+            return
+
         # Remembered so the idle/auto-disconnect timer has somewhere to
         # announce itself later, without needing an active command context.
         self.last_text_channel = ctx.channel
