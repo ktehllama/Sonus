@@ -10,6 +10,9 @@ URL_REGEX = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*(),]|(?:%[0-9a-fA-F][0-9
 # to give a ballpark ETA for playlists - actual time varies with network
 # conditions and per-video, so this is intentionally a loose estimate.
 SECONDS_PER_SONG_ESTIMATE = 3
+# How long to sit connected to a voice channel with nothing playing before
+# auto-disconnecting. Adjust to taste.
+IDLE_TIMEOUT_SECONDS = 600
 
 
 class QueueView(discord.ui.View):
@@ -71,8 +74,83 @@ class music_cog(commands.Cog):
         self.YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist': True, 'ignoreerrors': True}
         self.FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1', 'options': '-vn'}
         self.current_lookup_task = None
+        self.idle_timer_task = None
+        self.last_text_channel = None
 
         self.vc = None
+
+    def _cancel_idle_timer(self):
+        if self.idle_timer_task and not self.idle_timer_task.done():
+            self.idle_timer_task.cancel()
+        self.idle_timer_task = None
+
+    def _start_idle_timer(self):
+        self._cancel_idle_timer()
+        self.idle_timer_task = asyncio.ensure_future(self._idle_disconnect_after_delay())
+
+    async def _idle_disconnect_after_delay(self):
+        try:
+            await asyncio.sleep(IDLE_TIMEOUT_SECONDS)
+        except asyncio.CancelledError:
+            return
+
+        # Re-check state before actually leaving - something may have
+        # started playing again in the time it took the timer to fire.
+        if self.is_playing or self.vc is None or not self.vc.is_connected():
+            return
+
+        await self.vc.disconnect()
+        self.vc = None
+
+        if self.last_text_channel is not None:
+            song_embed = discord.Embed(
+                title="Left voice channel",
+                description=f"No music was played for {IDLE_TIMEOUT_SECONDS // 60} minutes, so I disconnected",
+                color=discord.Color.from_rgb(222, 46, 44)
+            )
+            song_embed.set_footer(text='👋 Auto-disconnect')
+            try:
+                await self.last_text_channel.send(embed=song_embed)
+            except discord.HTTPException:
+                pass
+
+    @commands.Cog.listener()
+    async def on_voice_state_update(self, member, before, after):
+        # If everyone else leaves the channel the bot is sitting in, leave
+        # too rather than sitting there talking to nobody.
+        if member.bot:
+            return
+        if self.vc is None or not self.vc.is_connected():
+            return
+
+        channel = self.vc.channel
+        if before.channel == channel and after.channel != channel:
+            remaining_humans = [m for m in channel.members if not m.bot]
+            if remaining_humans:
+                return
+
+            self._cancel_idle_timer()
+            self.music_queue = []
+            self.is_playing = False
+
+            if self.vc.is_playing() or self.vc.is_paused():
+                self.vc.stop()
+
+            await self.vc.disconnect()
+            self.vc = None
+            self._cancel_idle_timer()
+
+            if self.last_text_channel is not None:
+                song_embed = discord.Embed(
+                    title="Left voice channel",
+                    description="Everyone left the voice channel, so I disconnected and cleared the queue",
+                    color=discord.Color.from_rgb(222, 46, 44)
+                )
+                song_embed.set_footer(text='👋 Auto-disconnect')
+                try:
+                    await self.last_text_channel.send(embed=song_embed)
+                except discord.HTTPException:
+                    pass
 
     def _ffmpeg_options_for(self, song):
         # googlevideo.com URLs often reject requests that don't carry the
@@ -174,6 +252,7 @@ class music_cog(commands.Cog):
     def play_next(self):
         if len(self.music_queue) > 0:
             self.is_playing = True
+            self._cancel_idle_timer()
 
             song = self.music_queue[0][0]
             m_url = song['source']
@@ -183,10 +262,12 @@ class music_cog(commands.Cog):
             self.vc.play(discord.FFmpegPCMAudio(m_url, **self._ffmpeg_options_for(song)), after=lambda e: self.play_next())
         else:
             self.is_playing = False
+            self._start_idle_timer()
 
     async def play_music(self):
         if len(self.music_queue) > 0:
             self.is_playing = True
+            self._cancel_idle_timer()
 
             song = self.music_queue[0][0]
             m_url = song['source']
@@ -198,11 +279,16 @@ class music_cog(commands.Cog):
             self.vc.play(discord.FFmpegPCMAudio(m_url, **self._ffmpeg_options_for(song)), after=lambda e: self.play_next())
         else:
             self.is_playing = False
+            self._start_idle_timer()
 
     @commands.command(aliases=['p'])
     async def play(self, ctx, *args):
         query = " ".join(args)
         user = ctx.message.author
+
+        # Remembered so the idle/auto-disconnect timer has somewhere to
+        # announce itself later, without needing an active command context.
+        self.last_text_channel = ctx.channel
 
         vc_ch_mem = ctx.message.author.voice
         if vc_ch_mem is None:
@@ -441,6 +527,7 @@ class music_cog(commands.Cog):
 
             await self.vc.disconnect()
             self.vc = None
+            self._cancel_idle_timer()
 
             song_embed = discord.Embed(
                 title=f"{user.name} | Disconnected",
