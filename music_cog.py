@@ -12,7 +12,7 @@ URL_REGEX = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*(),]|(?:%[0-9a-fA-F][0-9
 SECONDS_PER_SONG_ESTIMATE = 3
 # How long to sit connected to a voice channel with nothing playing before
 # auto-disconnecting. Adjust to taste.
-IDLE_TIMEOUT_SECONDS = 600
+IDLE_TIMEOUT_SECONDS = 600 # 10 min
 
 
 class QueueView(discord.ui.View):
@@ -76,6 +76,8 @@ class music_cog(commands.Cog):
         self.current_lookup_task = None
         self.idle_timer_task = None
         self.last_text_channel = None
+        self.loop_current = False
+        self.now_playing = None
 
         self.vc = None
 
@@ -132,6 +134,7 @@ class music_cog(commands.Cog):
             self._cancel_idle_timer()
             self.music_queue = []
             self.is_playing = False
+            self.now_playing = None
 
             if self.vc.is_playing() or self.vc.is_paused():
                 self.vc.stop()
@@ -250,6 +253,16 @@ class music_cog(commands.Cog):
             return None
 
     def play_next(self):
+        # If looping is on and we still know what was just playing, replay
+        # it instead of advancing the queue. skip()/stop() clear
+        # now_playing first specifically so this branch gets bypassed then.
+        if self.loop_current and self.now_playing is not None:
+            self.is_playing = True
+            self._cancel_idle_timer()
+            song = self.now_playing
+            self.vc.play(discord.FFmpegPCMAudio(song['source'], **self._ffmpeg_options_for(song)), after=lambda e: self.play_next())
+            return
+
         if len(self.music_queue) > 0:
             self.is_playing = True
             self._cancel_idle_timer()
@@ -258,10 +271,12 @@ class music_cog(commands.Cog):
             m_url = song['source']
 
             self.music_queue.pop(0)
+            self.now_playing = song
 
             self.vc.play(discord.FFmpegPCMAudio(m_url, **self._ffmpeg_options_for(song)), after=lambda e: self.play_next())
         else:
             self.is_playing = False
+            self.now_playing = None
             self._start_idle_timer()
 
     async def play_music(self):
@@ -276,6 +291,7 @@ class music_cog(commands.Cog):
                 self.vc = await self.music_queue[0][1].connect()
 
             self.music_queue.pop(0)
+            self.now_playing = song
             self.vc.play(discord.FFmpegPCMAudio(m_url, **self._ffmpeg_options_for(song)), after=lambda e: self.play_next())
         else:
             self.is_playing = False
@@ -455,7 +471,7 @@ class music_cog(commands.Cog):
                 description=f"*`{total}` songs in queue*\n\n—\n{retval}",
                 color=discord.Color.from_rgb(109, 167, 250)
             )
-            footer = '📃 Queue'
+            footer = '📃 Queued'
             if total_pages > 1:
                 footer += f" | Page {page_num + 1}/{total_pages}"
             song_embed.set_footer(text=footer)
@@ -482,6 +498,7 @@ class music_cog(commands.Cog):
         stopped_playback = bool(self.vc and self.vc.is_playing())
         if stopped_playback:
             self.music_queue = []
+            self.now_playing = None
             self.vc.stop()
 
         if stopped_playback and cancelled_lookup:
@@ -508,7 +525,7 @@ class music_cog(commands.Cog):
                 description="There is no music playing",
                 color=discord.Color.from_rgb(232, 14, 51)
             )
-            song_embed.set_footer(text='🛑 Stop')
+            song_embed.set_footer(text='🛑 Stoped')
             await ctx.reply(embed=song_embed, mention_author=False)
             await ctx.message.add_reaction('🛑')
 
@@ -521,6 +538,7 @@ class music_cog(commands.Cog):
             # empty queue and doesn't try to start another song.
             self.music_queue = []
             self.is_playing = False
+            self.now_playing = None
 
             if self.vc.is_playing():
                 self.vc.stop()
@@ -543,7 +561,7 @@ class music_cog(commands.Cog):
                 description="I'm not currently in a voice channel",
                 color=discord.Color.from_rgb(232, 14, 51)
             )
-            song_embed.set_footer(text='👋 Disconnect')
+            song_embed.set_footer(text='👋 Disconnected')
             await ctx.reply(embed=song_embed, mention_author=False)
             await ctx.message.add_reaction('👋')
 
@@ -566,7 +584,7 @@ class music_cog(commands.Cog):
                 description="There is no music currently playing",
                 color=discord.Color.from_rgb(232, 14, 51)
             )
-            song_embed.set_footer(text='⏸️ Pause')
+            song_embed.set_footer(text='⏸️ Paused')
             await ctx.reply(embed=song_embed, mention_author=False)
             await ctx.message.add_reaction('⏸️')
 
@@ -589,14 +607,38 @@ class music_cog(commands.Cog):
                 description="Playback is not currently paused",
                 color=discord.Color.from_rgb(232, 14, 51)
             )
-            song_embed.set_footer(text='▶️ Resume')
+            song_embed.set_footer(text='▶️ Resumed')
             await ctx.reply(embed=song_embed, mention_author=False)
             await ctx.message.add_reaction('▶️')
+
+    @commands.command(aliases=['lp'])
+    async def loop(self, ctx):
+        user = ctx.message.author
+        self.loop_current = not self.loop_current
+
+        if self.loop_current:
+            description = "Looping the current song is now **on**"
+            if self.now_playing:
+                description += f"\nRepeating **`{self.now_playing['title']}`**"
+            color = discord.Color.from_rgb(13, 217, 199)
+        else:
+            description = "Looping the current song is now **off**"
+            color = discord.Color.from_rgb(232, 14, 51)
+
+        song_embed = discord.Embed(
+            title=f"{user.name} | Loop",
+            description=description,
+            color=color
+        )
+        song_embed.set_footer(text='🔁 Looping')
+        await ctx.reply(embed=song_embed, mention_author=False)
+        await ctx.message.add_reaction('🔁')
 
     @commands.command(aliases=['s'])
     async def skip(self, ctx):
         user = ctx.message.author
         if self.vc is not None:
+            self.now_playing = None
             self.vc.stop()
             await self.play_music()
             song_embed = discord.Embed(
@@ -604,6 +646,6 @@ class music_cog(commands.Cog):
                 description="Skipped current song (even if there are not any other songs in queue)",
                 color=discord.Color.from_rgb(213, 234, 247)
             )
-            song_embed.set_footer(text='⏩ Skip')
+            song_embed.set_footer(text='⏩ Skiped')
             await ctx.reply(embed=song_embed, mention_author=False)
             await ctx.message.add_reaction('⏩')
