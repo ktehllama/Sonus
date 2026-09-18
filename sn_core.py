@@ -3,7 +3,7 @@ from discord.ext import commands
 
 from music_cog import music_cog
 
-TOKEN = 'MTU0ODM4MDY2NzgxNTkxOTc1Nw.G1Ir0a.DU0aWWeuHXPAndPUziCDCZtGqTLkOzwKTvOqdc'
+TOKEN = 'token_here'
 
 intents = discord.Intents.default()
 intents.message_content = True
